@@ -1,17 +1,83 @@
-import { component$, Slot } from "@builder.io/qwik";
-import type { RequestHandler } from "@builder.io/qwik-city";
+import { component$, Resource, Slot, useResource$ } from "@qwik.dev/core";
+import type { RequestHandler } from "@qwik.dev/router";
+import { Link, server$, useDocumentHead } from "@qwik.dev/router";
 
 export const onGet: RequestHandler = async ({ cacheControl }) => {
-  // Control caching for this request for best performance and to reduce hosting costs:
-  // https://qwik.dev/docs/caching/
   cacheControl({
-    // Always serve a cached response by default, up to a week stale
-    staleWhileRevalidate: 60 * 60 * 24 * 7,
-    // Max once every 5 seconds, revalidate on the server to get a fresh version of this page
-    maxAge: 5,
+    staleWhileRevalidate: 0,
+    maxAge: 0,
   });
 };
 
+interface Author {
+  id: string;
+  name: string;
+}
+
+const authors: Author[] = [
+  {
+    id: "foo",
+    name: "Bar",
+  },
+  {
+    id: "johndoe",
+    name: "John",
+  },
+  {
+    id: "janedoe",
+    name: "Jane",
+  },
+];
+
+const getAuthor = server$(function (id: string): Promise<Author | undefined> {
+  return Promise.resolve(authors.find((a) => a.id === id)!);
+});
+
 export default component$(() => {
-  return <Slot />;
+  const head = useDocumentHead();
+
+  // ideally this should be in a computed signal to make it reactive,
+  // but 'head' is not serializable (same issue in V1)
+  const authorId = head.meta.find((m) => m.name === "author")?.content;
+
+  const author = useResource$(({ track, cleanup }) => {
+    const id = track(() => authorId);
+    if (!id) return;
+
+    const abort = new AbortController();
+    cleanup(() => abort.abort());
+
+    return getAuthor(abort.signal, id);
+  });
+
+  return (
+    <>
+      {head.frontmatter.home && <Slot />}
+
+      {!head.frontmatter.home && (
+        <Resource
+          value={author}
+          onResolved={(a) => (
+            <>
+              {a && <p>Article by {a.name}</p>}
+
+              <Slot />
+
+              <ul>
+                <li>
+                  <Link href="/">Home</Link>
+                </li>
+                <li>
+                  <Link href="/my-first-post/">My first post</Link>
+                </li>
+                <li>
+                  <Link href="/my-second-post/">My second post</Link>
+                </li>
+              </ul>
+            </>
+          )}
+        />
+      )}
+    </>
+  );
 });
